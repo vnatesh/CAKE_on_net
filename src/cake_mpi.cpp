@@ -2,7 +2,7 @@
 #include "cake.h"
 
 
-int get_block_dim_C2(int dev_dram_sz, double alpha_n, int p);
+int get_block_dim_C2(unsigned long long dev_dram_sz, double alpha_n, int p);
 void pack_A_h(float* A, float* A_p, int M, int K, int m_h, int k_h, int m_r, int p);
 void pack_B_h(float* B, float* B_p, int K, int N, int m_h, int k_h, int n_h, double alpha_n, int p);
 void unpack_C_h(float* C, float* C_p, int M, int N, int m_h, int n_h, int m_r, double alpha_n, int p);
@@ -88,11 +88,11 @@ int main(int argc, char *argv[]) {
 
    int m_h, k_h, n_h;
    double alpha_n = 1.0;
-   m_h = get_block_dim_C2(1<<30, alpha_n, p);
+   m_h = get_block_dim_C2(1ULL << 31, alpha_n, p);
    k_h = m_h;
    n_h = (int) (alpha_n * p * m_h);
 
-   int p_dev = 3; // number of cores on a single device
+   int p_dev = 2; // number of cores on a single device
    int mr_dev = 6; //4; // mr on raspbi device
    int m_r = mr_dev*p_dev > m_h ? m_h : mr_dev*p_dev;
 
@@ -133,11 +133,10 @@ int main(int argc, char *argv[]) {
       printf("M = %d, K = %d, N = %d\n", M,K,N);
       printf("mh = %d\n", m_h);
 
-      omp_set_num_threads(1); // TODO: use 10 threads only on intel i9 10900K
+      omp_set_num_threads(10); // TODO: use 10 threads only on intel i9 10900K
 
       struct timespec start, end;
       double diff_t;
-      clock_gettime(CLOCK_REALTIME, &start);
 
 
       float* A = (float*) malloc(M * K * sizeof( float ));
@@ -153,6 +152,8 @@ int main(int argc, char *argv[]) {
       float* A_p = (float*) malloc(M * K * sizeof( float ));
       float* B_p = (float*) malloc(K * N * sizeof( float ));
       float* C_p = (float*) calloc(M * N , sizeof( float ));
+
+      clock_gettime(CLOCK_REALTIME, &start);
 
       // pack A and B before sending to hosts
       pack_A_h(A, A_p, M, K, m_h, k_h, m_r, p);
@@ -348,11 +349,16 @@ int main(int argc, char *argv[]) {
 
       int host = taskid - 1;
 
-      float *A_h, *B_h, *C_h;
+      float *A_h, *B_h, *C_h, *A_p;
 
       int m = 0, k = 0, n = 0;
       int nb_ind = 0;
       int n_h_t, k_h_t, m_h_t;
+
+
+      // A_h = (float*) calloc(m_h * k_h , sizeof(float));
+      // B_h = (float*) malloc(k_h*n_h * sizeof(float));
+      // posix_memalign((void**) &A_p, 64, (m_h+mr_dev) * k_h * sizeof(float));
 
       while(n < Nb) {
 
@@ -393,6 +399,13 @@ int main(int argc, char *argv[]) {
             MPI_Scatterv(NULL, NULL, NULL, MPI_FLOAT, A_h, m_h_t * k_h_t, 
                         MPI_FLOAT, 0, comm_used);
 
+            cake_cntx_t* cake_cntx = cake_query_cntx();
+            blk_dims_t* blk_dims = get_block_dims(cake_cntx, m_h_t, p_dev);
+
+            int A_sz = cake_sgemm_packed_A_size(m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
+            posix_memalign((void**) &A_p, 64, A_sz);
+            pack_A_single_buf(A_h, A_p, m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
+
             // if(n == 0 && m == 2 && host == 1) {
             //    printf("blah A scatter m = %d, n = %d from host = %d, m_h_t = %d, n_h_t = %d\n", m,n, host,m_h_t ,n_h_t);
             //    // exit(1);
@@ -426,8 +439,8 @@ int main(int argc, char *argv[]) {
                MPI_Bcast(B_h, k_h_t*n_hx, MPI_FLOAT, 0, comm_used);
 
                // execute matmul
-               cake_cntx_t* cake_cntx = cake_query_cntx();
-               cake_sgemm(A_h, B_h, &C_h[C_offset], m_h_t, n_hx, k_h_t, p_dev, cake_cntx);
+               cake_sgemm(A_p, B_h, &C_h[C_offset], m_h_t, n_hx, k_h_t, p_dev, cake_cntx, true, false);
+               // cake_sgemm(A_h, B_h, &C_h[C_offset], m_h_t, n_hx, k_h_t, p_dev, cake_cntx);
                // cake_sgemm_checker(A_h, B_h, &C_h[C_offset], n_hx, m_h_t, k_h_t);
 
                // if(host == 0) {
@@ -452,12 +465,16 @@ int main(int argc, char *argv[]) {
 
                C_offset += m_h_t*n_hx;
                nb_ind++;
+               // memset(B_h, 0, k_h * n_h * sizeof(float));
                free(B_h);
             }
 
             k++;
             nb_ind = 0;
             free(A_h);
+            free(A_p);
+            // memset(A_h, 0, k_h * m_h * sizeof(float));
+            // memset(A_p, 0, k_h * (m_h+mr_dev) * sizeof(float));
 
 
             if(k == Kb) {
@@ -493,7 +510,7 @@ int main(int argc, char *argv[]) {
 
 
 
-int get_block_dim_C2(int dev_dram_sz, double alpha_n, int p) {
+int get_block_dim_C2(unsigned long long dev_dram_sz, double alpha_n, int p) {
 
    return (int) sqrt(((double) dev_dram_sz / (4*2*2.0)) / (2 + alpha_n*p));
 }
