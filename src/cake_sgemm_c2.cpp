@@ -1,44 +1,15 @@
 #include "cake_c2.h"
 #include "cake.h"
 
+
 int main(int argc, char *argv[]) {
-
-   // int numprocs,              /* number of tasks in partition */
-   // rank;                /* a task identifier */
-   
-   // MPI_Init(&argc,&argv);
-   // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-   // MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
-
-   // int p_l = 2;
-   // int color = rank <= p_l ? 1 : MPI_UNDEFINED; // Determine color based on row
-
-   // // Split the communicator based on the color and use the
-   // // original rank for ordering
-   // MPI_Comm comm_pad;
-   // MPI_Comm_split(MPI_COMM_WORLD, color, rank, &comm_pad);
-
-
-   // if(rank <= p_l) {
-   //    int pad_rank, p;
-   //    MPI_Comm_rank(comm_pad, &pad_rank);
-   //    MPI_Comm_size(comm_pad, &p);
-   //    printf("proc : %d \t pad rank: %d with p_l = %d\n", rank, pad_rank, p);
-   //    MPI_Comm_free(&comm_pad);
-   // }
-
-   // printf("proc : %d \n", rank);
-
-
-   // exit(1);
 
    int numtasks,              /* number of tasks in partition */
    taskid,                /* a task identifier */
    rc;                 /* err */
 
-
    // MPI setup
-   MPI_Init(&argc,&argv);
+   MPI_Init(&argc, &argv);
    MPI_Comm_rank(MPI_COMM_WORLD,&taskid);
    MPI_Comm_size(MPI_COMM_WORLD,&numtasks);
 
@@ -67,27 +38,29 @@ int main(int argc, char *argv[]) {
       mat_inputs[1] = K;
       mat_inputs[2] = N;
       mat_inputs[3] = p;
+      // bcast M,N,K,p
+      MPI_Bcast(mat_inputs, 4, MPI_INT, 0, MPI_COMM_WORLD);
    }
 
-   // bcast M,N,K,p
-   MPI_Bcast(mat_inputs, 4, MPI_INT, 0, MPI_COMM_WORLD);
-   
    // hosts bcast recv M,N,K,p from server
-   if(taskid > 0) {
+   else {
+      MPI_Bcast(mat_inputs, 4, MPI_INT, 0, MPI_COMM_WORLD);
       M = mat_inputs[0];
       K = mat_inputs[1];
       N = mat_inputs[2];
       p = mat_inputs[3];
    }
 
+   // cake_sgemm_net(M, N, K, p, taskid);
+
    int m_h, k_h, n_h;
    double alpha_n = 1.0;
-   m_h = get_block_dim_C2(1ULL << 31, alpha_n, p);
+   m_h = get_block_dim_C2(1ULL << 26, alpha_n, p);
    k_h = m_h;
    n_h = (int) (alpha_n * p * m_h);
 
-   int p_dev = 2; // number of cores on a single device
-   int mr_dev = 6; //4; // mr on raspbi device
+   int p_dev = 4; // number of cores on a single device
+   int mr_dev = 4; //4; // mr on raspbi device
    int m_r = mr_dev*p_dev > m_h ? m_h : mr_dev*p_dev;
 
    int k_pad = (K % k_h) ? 1 : 0; 
@@ -121,7 +94,6 @@ int main(int argc, char *argv[]) {
    MPI_Comm_split(MPI_COMM_WORLD, color, taskid, &comm_pad);
 
 
-
    if(taskid == 0) {
       
       printf("M = %d, K = %d, N = %d\n", M,K,N);
@@ -153,43 +125,7 @@ int main(int argc, char *argv[]) {
       pack_A_h(A, A_p, M, K, m_h, k_h, m_r, p);
       pack_B_h(B, B_p, K, N, m_h, k_h, n_h, alpha_n, p);
 
-      // printf("HEYY\n");
-      // for(int i = 0; i < K; i++) {
-      //    for(int j = 0; j < N; j++) {
-      //       printf("%.2f ", B[i*N + j]);
-      //    }
-      //    printf("\n");
-      // }
-
-      // printf("\n\nNOOO\n");
-      // for(int i = 0; i < K; i++) {
-      //    for(int j = 0; j < N; j++) {
-      //       printf("%.2f ", B_p[i*N + j]);
-      //    }
-      //    printf("\n");
-      // }
-
-      // printf("HEYY\n");
-      // for(int i = 0; i < M; i++) {
-      //    for(int j = 0; j < K; j++) {
-      //       printf("%f ", A[i*K + j]);
-      //    }
-      //    printf("\n");
-      // }
-
-      // printf("\n\nNOOO\n");
-      // for(int i = 0; i < M; i++) {
-      //    for(int j = 0; j < K; j++) {
-      //       printf("%f ", A_p[i*K + j]);
-      //    }
-      //    printf("\n");
-      // }
-
       if(DEBUG) printf("m_h = %d, k_h = %d, n_h = %d\n", m_h, k_h, n_h);
-
-      // exit(1);
-
-
 
       int A_offset = 0;
       int B_offset = 0;
@@ -283,13 +219,6 @@ int main(int argc, char *argv[]) {
                curr_disp += recvcounts[host+1];
             }
 
-            // printf("recvcnts CC HEY \n");
-            // printf("n_h_t = %d, m_h = %d, m_h1 = %d, m_h1_last_host = %d, p_l = %d\n\n", n_h_t, m_h, m_h1, m_h1_last_host, p_l);
-            // for(int x = 0; x < (p + 1); x++) {
-            //    printf("%d ", recvcounts[x]);
-            // }
-            // printf("\n\n\n\n");
-
             MPI_Gatherv(NULL, 0, MPI_FLOAT, &C_p[C_offset], recvcounts, displs,
                MPI_FLOAT, 0, comm_used);
 
@@ -300,25 +229,7 @@ int main(int argc, char *argv[]) {
          }
       }
 
-      // printf("\n\n\n\n");
-      // float* C1 = (float*) calloc(M * N , sizeof( float ));
-      // cake_cntx_t* cake_cntx = cake_query_cntx();
-      // cake_sgemm(A, B, C1, M, N, K, 10, cake_cntx);
-      // for(int i = 0; i < M*N; i++) {
-      //    printf("%f ", C1[i]);
-      // }
-      // printf("\n\n\n\n");
-
-
       unpack_C_h(C, C_p, M, N, m_h, n_h, m_r, alpha_n, p);
-
-
-      // printf("\n\n\n\n");
-
-      // for(int i = 0; i < M*N; i++) {
-      //    printf("%f ", C[i]);
-      // }
-      // printf("\n\n\n\n");
 
       clock_gettime(CLOCK_REALTIME, &end);
       long seconds = end.tv_sec - start.tv_sec;
@@ -326,9 +237,11 @@ int main(int argc, char *argv[]) {
       diff_t = seconds + nanoseconds*1e-9;
       printf("sgemm time: %f \n", diff_t); 
 
-
       cake_sgemm_checker(A, B, C, N, M, K);
 
+      free(sendcounts);
+      free(recvcounts);
+      free(displs);
       free(A_p);
       free(B_p);
       free(C_p);
@@ -341,6 +254,22 @@ int main(int argc, char *argv[]) {
 
    if (taskid > 0) {
 
+
+      char hostbuffer[256];
+      char *IPbuffer;
+      struct hostent *host_entry;
+      int hostname;
+
+      // To retrieve hostname
+      hostname = gethostname(hostbuffer, sizeof(hostbuffer));
+      host_entry = gethostbyname(hostbuffer);
+
+      IPbuffer = inet_ntoa(*((struct in_addr*)
+                  host_entry->h_addr_list[0]));
+
+      printf("Hostname: %s\n", hostbuffer);
+      printf("Host IP: %s", IPbuffer);
+
       int host = taskid - 1;
 
       float *A_h, *B_h, *C_h, *A_p;
@@ -349,10 +278,23 @@ int main(int argc, char *argv[]) {
       int nb_ind = 0;
       int n_h_t, k_h_t, m_h_t;
 
+      printf("HEYY %d\n",host);
 
-      // A_h = (float*) calloc(m_h * k_h , sizeof(float));
-      // B_h = (float*) malloc(k_h*n_h * sizeof(float));
-      // posix_memalign((void**) &A_p, 64, (m_h+mr_dev) * k_h * sizeof(float));
+      if(posix_memalign((void**) &A_h, 64, m_h * k_h * sizeof(float))) {
+         printf("posix memalign error\n");
+         exit(1);
+      }
+
+      if(posix_memalign((void**) &A_p, 64, (m_h+mr_dev) * k_h * sizeof(float))) {
+         printf("posix memalign error\n");
+         exit(1);
+      }
+
+      if(posix_memalign((void**) &B_h, 64, k_h * n_h * sizeof(float))) {
+         printf("posix memalign error\n");
+         exit(1);
+      }
+
 
       while(n < Nb) {
 
@@ -387,7 +329,7 @@ int main(int argc, char *argv[]) {
                C_h = (float*) calloc(m_h_t * n_h_t , sizeof( float ));
             }
 
-            A_h = (float*) malloc(m_h_t * k_h_t * sizeof( float ));
+            // A_h = (float*) malloc(m_h_t * k_h_t * sizeof( float ));
             
             // mpi scatterv recv A_h
             MPI_Scatterv(NULL, NULL, NULL, MPI_FLOAT, A_h, m_h_t * k_h_t, 
@@ -396,24 +338,9 @@ int main(int argc, char *argv[]) {
             cake_cntx_t* cake_cntx = cake_query_cntx();
             blk_dims_t* blk_dims = get_block_dims(cake_cntx, m_h_t, p_dev);
 
-            int A_sz = cake_sgemm_packed_A_size(m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
-            posix_memalign((void**) &A_p, 64, A_sz);
+            // int A_sz = cake_sgemm_packed_A_size(m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
+            // posix_memalign((void**) &A_p, 64, A_sz);
             pack_A_single_buf(A_h, A_p, m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
-
-            // if(n == 0 && m == 2 && host == 1) {
-            //    printf("blah A scatter m = %d, n = %d from host = %d, m_h_t = %d, n_h_t = %d\n", m,n, host,m_h_t ,n_h_t);
-            //    // exit(1);
-            // }
-
-            // if(host == 1) {
-            //    printf("host %d, size = %d\n\n", host,m_h_t * k_h_t);
-            //    for(int i = 0; i < m_h_t*k_h_t; i++) {
-            //          printf("%f ", A_h[i]);  
-            //    }
-            //    printf("\n\n\n\n");
-            // }
-
-            // exit(1);
 
             int z1 = (int) (alpha_n*m_h);
             int num_B = (n_h_t / z1) + ((n_h_t % z1) ? 1 : 0);
@@ -427,49 +354,25 @@ int main(int argc, char *argv[]) {
                   n_hx = n_rem;
                }
 
-               B_h = (float*) malloc(k_h_t*n_hx * sizeof(float));
+               // B_h = (float*) malloc(k_h_t*n_hx * sizeof(float));
 
                // mpi bcast recv B_h
                MPI_Bcast(B_h, k_h_t*n_hx, MPI_FLOAT, 0, comm_used);
 
                // execute matmul
-               cake_sgemm(A_p, B_h, &C_h[C_offset], m_h_t, n_hx, k_h_t, p_dev, cake_cntx, true, false);
-               // cake_sgemm(A_h, B_h, &C_h[C_offset], m_h_t, n_hx, k_h_t, p_dev, cake_cntx);
-               // cake_sgemm_checker(A_h, B_h, &C_h[C_offset], n_hx, m_h_t, k_h_t);
-
-               // if(host == 0) {
-               //    if(cake_sgemm_checker(A_h, B_h, &C_h[C_offset], n_hx, m_h_t, k_h_t)) {
-               //       printf("%d %d %d %d\n", n_hx, m_h_t, k_h_t, C_offset);
-
-               //       for(int i = 0; i < k_h_t*m_h_t; i++) {
-               //             printf("%.2f ", A_h[i]);  
-               //       }
-               //       printf("\n\n\n\n");
-
-
-               //       for(int i = 0; i < k_h_t*n_hx; i++) {
-               //             printf("%.2f ", B_h[i]);  
-               //       }
-               //       printf("\n\n\n\n");
-
-               
-               //       exit(1);
-               //    };
-               // }
-
+               cake_sgemm(A_p, B_h, &C_h[C_offset], m_h_t, n_hx, k_h_t, p_dev, cake_cntx, true, false, 1 , 1);
                C_offset += m_h_t*n_hx;
                nb_ind++;
                // memset(B_h, 0, k_h * n_h * sizeof(float));
-               free(B_h);
+               // free(B_h);
             }
 
             k++;
             nb_ind = 0;
-            free(A_h);
-            free(A_p);
+            // free(A_h);
+            // free(A_p);
             // memset(A_h, 0, k_h * m_h * sizeof(float));
             // memset(A_p, 0, k_h * (m_h+mr_dev) * sizeof(float));
-
 
             if(k == Kb) {
 
@@ -487,9 +390,11 @@ int main(int argc, char *argv[]) {
                n++;
             }
          }
-
-
       }
+
+      free(A_h);
+      free(A_p);
+      free(B_h);
    }
 
 
