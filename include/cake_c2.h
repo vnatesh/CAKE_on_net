@@ -2,13 +2,21 @@
 #include <stdlib.h>
 #include <sys/time.h> 
 #include <math.h>
-#include <time.h> 
+#include <time.h>
+#include <unistd.h>
+#include <errno.h>
+#include <netdb.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h> 
 //#include <omp.h>
 
 #include "blis.h"
 #include "mpi.h"
 
 
+// void cake_sgemm_net(int M, int N, int K, int p, int taskid, MPI_Comm comm_world);
 
 int get_block_dim_C2(unsigned long long dev_dram_sz, double alpha_n, int p);
 
