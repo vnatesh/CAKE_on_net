@@ -5,7 +5,7 @@ This repository contains an implementation of the CAKE matrix-multiplication alg
 
 Before installing CAKE_on_net, please download and install the folowing dependencies:
 
-* `[CAKE_on_CPU](https://github.com/vnatesh/CAKE_on_CPU/)`.  
+* `CAKE_on_CPU (https://github.com/vnatesh/CAKE_on_CPU/)`
 * `mpich-3.3.2`
 
 To install CAKE_on_net, simply do:
