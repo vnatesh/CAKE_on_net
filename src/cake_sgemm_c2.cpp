@@ -1,6 +1,7 @@
 #include "cake_c2.h"
-#include "cake.h"
+// #include "cake.h"
 
+void mpi_gather_launch(float* C_h, int m_h_t, int n_h_t, MPI_Comm comm_used);
 
 int main(int argc, char *argv[]) {
 
@@ -55,7 +56,8 @@ int main(int argc, char *argv[]) {
 
    int m_h, k_h, n_h;
    double alpha_n = 1.0;
-   m_h = get_block_dim_C2(1ULL << 26, alpha_n, p);
+   int p_max = 3;
+   m_h = get_block_dim_C2(1ULL << 30, alpha_n, p_max);
    k_h = m_h;
    n_h = (int) (alpha_n * p * m_h);
 
@@ -254,6 +256,10 @@ int main(int argc, char *argv[]) {
 
    if (taskid > 0) {
 
+      struct timespec start, end;
+      double diff_t;
+
+      omp_set_num_threads(p_dev);
 
       char hostbuffer[256];
       char *IPbuffer;
@@ -272,7 +278,7 @@ int main(int argc, char *argv[]) {
 
       int host = taskid - 1;
 
-      float *A_h, *B_h, *C_h, *A_p;
+      float *A_h, *B_h, *B_h1, *B_h2, *C_h, *A_p;
 
       int m = 0, k = 0, n = 0;
       int nb_ind = 0;
@@ -290,11 +296,25 @@ int main(int argc, char *argv[]) {
          exit(1);
       }
 
-      if(posix_memalign((void**) &B_h, 64, k_h * n_h * sizeof(float))) {
+      // double buffer for B_h
+      if(posix_memalign((void**) &B_h1, 64, k_h * n_h * sizeof(float))) {
          printf("posix memalign error\n");
          exit(1);
       }
 
+      if(posix_memalign((void**) &B_h2, 64, k_h * n_h * sizeof(float))) {
+         printf("posix memalign error\n");
+         exit(1);
+      }
+
+      // asynchronous thread to launch cake_sgemm to overlap IO and compute
+      pthread_t gemm_thread;
+
+      struct gemm_input* inp = (struct gemm_input*) malloc(sizeof(gemm_input));
+      inp->packedA = 1;
+      inp->packedB = 0;
+      inp->alpha = 1;
+      inp->beta = 1;
 
       while(n < Nb) {
 
@@ -340,12 +360,16 @@ int main(int argc, char *argv[]) {
 
             // int A_sz = cake_sgemm_packed_A_size(m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
             // posix_memalign((void**) &A_p, 64, A_sz);
+            // pack A and reused this packed copy for all B tiles in the CB block
             pack_A_single_buf(A_h, A_p, m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
 
             int z1 = (int) (alpha_n*m_h);
             int num_B = (n_h_t / z1) + ((n_h_t % z1) ? 1 : 0);
             int n_rem = n_h_t % z1;
             int C_offset = 0;
+
+            bool buf = 0; // controls buf choice
+            B_h = B_h1;
 
             while(nb_ind < num_B) {
 
@@ -359,13 +383,36 @@ int main(int argc, char *argv[]) {
                // mpi bcast recv B_h
                MPI_Bcast(B_h, k_h_t*n_hx, MPI_FLOAT, 0, comm_used);
 
+               if(nb_ind > 0) {
+                  pthread_join(gemm_thread, NULL);
+               }
+
+               inp->M = m_h_t;
+               inp->N = n_hx;
+               inp->K = k_h_t;
+               inp->p = p_dev;
+               inp->A = A_p;
+               inp->B = B_h;
+               inp->C = &C_h[C_offset];
+               inp->cake_cntx = cake_cntx; 
+
+               // switch buffers for double buffering
+               B_h = buf ? B_h1 : B_h2;
+               buf = !buf;
+
+               if(pthread_create(&gemm_thread, NULL, cake_sgemm_launch, (void*) inp) != 0) {
+                  printf("Thread creation failed\n");
+               }
+
                // execute matmul
-               cake_sgemm(A_p, B_h, &C_h[C_offset], m_h_t, n_hx, k_h_t, p_dev, cake_cntx, true, false, 1 , 1);
+               // cake_sgemm(A_p, B_h, &C_h[C_offset], m_h_t, n_hx, k_h_t, p_dev, cake_cntx, true, false, 1 , 1);
                C_offset += m_h_t*n_hx;
                nb_ind++;
                // memset(B_h, 0, k_h * n_h * sizeof(float));
                // free(B_h);
             }
+
+            pthread_join(gemm_thread, NULL);
 
             k++;
             nb_ind = 0;
@@ -377,12 +424,12 @@ int main(int argc, char *argv[]) {
             if(k == Kb) {
 
                // gatherv C_h
-               MPI_Gatherv(C_h, m_h_t * n_h_t, MPI_FLOAT,
-                           NULL, NULL, NULL, MPI_FLOAT, 0, comm_used);
-
+               // MPI_Gatherv(C_h, m_h_t * n_h_t, MPI_FLOAT,
+               //             NULL, NULL, NULL, MPI_FLOAT, 0, comm_used);
+               mpi_gather_launch(C_h, m_h_t, n_h_t, comm_used);
                k = 0;
                m++;
-               free(C_h);
+               // free(C_h);
             }
 
             if(m == Mb) {
@@ -392,9 +439,11 @@ int main(int argc, char *argv[]) {
          }
       }
 
+      free(inp);
       free(A_h);
       free(A_p);
-      free(B_h);
+      free(B_h1);
+      free(B_h2);
    }
 
 
@@ -405,5 +454,13 @@ int main(int argc, char *argv[]) {
    MPI_Finalize();
 
    return 0;
+}
+
+
+void mpi_gather_launch(float* C_h, int m_h_t, int n_h_t, MPI_Comm comm_used) {
+
+   MPI_Gatherv(C_h, m_h_t * n_h_t, MPI_FLOAT,
+            NULL, NULL, NULL, MPI_FLOAT, 0, comm_used);
+   free(C_h);
 }
 

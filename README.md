@@ -1,5 +1,5 @@
 # Overview
-This repository contains an implementation of the CAKE matrix-multiplication algorithm at the network layer for an MPI cluster of heterogenous CPUs. A matrix residing on a server is partitioned into tiles that are scheduled for computation on each host CPU. Each host then uses CAKE to schedule the tile matrix-multiplication on multiple cores. Completed result tiles are aggregated at the server from each host. 
+This repository contains an implementation of the CAKE matrix-matrix-multiplication (MMM) algorithm at the network layer for an MPI cluster of heterogenous CPUs. A matrix residing on a server is partitioned into tiles that are scheduled for computation on each host CPU. Each host then uses CAKE to schedule the tile MMM on multiple cores. Completed result tiles are aggregated at the server from each host. 
 
 ## Installation
 
@@ -16,7 +16,7 @@ make
 
 ## Quick Start
 
-In the `examples` directory, you will find a simple script `cake_sgemm_test.cpp` that performs CAKE matrix multiplication on random input matrices given M, K, and N values as command line arguments. You will need to provide an MPI hostfile containing the hostnames of all nodes involved in your cluster. Make sure you have sourced the `env.sh` file from the [CAKE_on_CPU](https://github.com/vnatesh/CAKE_on_CPU) library on all nodes before running the example. An example hostfile is shown below:
+In the `examples` directory, you will find a simple script `cake_sgemm_test.cpp` that performs CAKE matrix multiplication on random input matrices given M, K, and N values as command line arguments. You will need to provide an MPI hostfile containing the hostnames of all nodes involved in your cluster and then pass the hostfile to mpiexec. Make sure you have sourced the `env.sh` file from the [CAKE_on_CPU](https://github.com/vnatesh/CAKE_on_CPU) library on all nodes before running the example. An example hostfile is shown below:
 
 ```bash
 manager:1

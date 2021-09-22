@@ -14,6 +14,7 @@
 
 #include "blis.h"
 #include "mpi.h"
+#include "cake.h"
 
 
 // void cake_sgemm_net(int M, int N, int K, int p, int taskid, MPI_Comm comm_world);
@@ -25,3 +26,5 @@ void pack_A_h(float* A, float* A_p, int M, int K, int m_h, int k_h, int m_r, int
 void pack_B_h(float* B, float* B_p, int K, int N, int m_h, int k_h, int n_h, double alpha_n, int p);
 
 void unpack_C_h(float* C, float* C_p, int M, int N, int m_h, int n_h, int m_r, double alpha_n, int p);
+
+// int run_tests();
