@@ -1,7 +1,6 @@
 #include "cake_c2.h"
-// #include "cake.h"
 
-void mpi_gather_launch(float* C_h, int m_h_t, int n_h_t, MPI_Comm comm_used);
+
 
 int main(int argc, char *argv[]) {
 
@@ -56,7 +55,7 @@ int main(int argc, char *argv[]) {
 
    int m_h, k_h, n_h;
    double alpha_n = 1.0;
-   int p_max = 3;
+   int p_max = 4;
    m_h = get_block_dim_C2(1ULL << 30, alpha_n, p_max);
    k_h = m_h;
    n_h = (int) (alpha_n * p * m_h);
@@ -106,7 +105,6 @@ int main(int argc, char *argv[]) {
       struct timespec start, end;
       double diff_t;
 
-
       float* A = (float*) malloc(M * K * sizeof( float ));
       float* B = (float*) malloc(K * N * sizeof( float ));
       float* C = (float*) calloc(M * N , sizeof( float ));
@@ -133,11 +131,17 @@ int main(int argc, char *argv[]) {
       int B_offset = 0;
       int C_offset = 0;
       int* sendcounts = (int*) calloc((p + 1) , sizeof(int));
-      int* displs = (int*) calloc((p + 1) , sizeof(int));
+      int* displs_A = (int*) calloc((p + 1) , sizeof(int));
+      int* displs_C = (int*) calloc((p + 1) , sizeof(int));
       int* recvcounts = (int*) calloc((p + 1) , sizeof(int));
 
       int m, k, n;
       int m_cb, n_h_t, k_h_t, p_used, host;
+
+
+      MPI_Request req;
+      MPI_Status status;
+
 
       for(n = 0; n < Nb; n++) {
 
@@ -154,10 +158,12 @@ int main(int argc, char *argv[]) {
                p_used = p_l;
                m_cb = M % (p*m_h);
                comm_used = comm_pad;
+               // comm_result_used = comm_result_pad;
             } else {
                p_used = p;
                m_cb = p_used*m_h;
                comm_used = MPI_COMM_WORLD;
+               // comm_result_used = comm_result;
             }
 
             B_offset = n*K*n_h;
@@ -180,16 +186,16 @@ int main(int argc, char *argv[]) {
                      sendcounts[host+1] = m_h*k_h_t;
                   }
 
-                  displs[host+1] = curr_disp;
+                  displs_A[host+1] = curr_disp;
                   curr_disp += sendcounts[host+1];
                }
 
-               MPI_Scatterv(&A_p[A_offset], sendcounts, displs,
+               MPI_Scatterv(&A_p[A_offset], sendcounts, displs_A,
                      MPI_FLOAT, NULL, 0, MPI_FLOAT, 0, comm_used);
 
                A_offset += m_cb*k_h_t;
                memset(sendcounts, 0, (p + 1) * sizeof(int));
-               memset(displs, 0, (p + 1) * sizeof(int));
+               memset(displs_A, 0, (p + 1) * sizeof(int));
 
 
                int z1 = (int) (alpha_n*m_h);
@@ -205,7 +211,15 @@ int main(int argc, char *argv[]) {
                   MPI_Bcast(&B_p[B_offset], bcast_cnt, MPI_FLOAT, 0, comm_used);
                   B_offset += bcast_cnt;
                }
+
             }
+
+
+            if(C_offset) {
+               MPI_Wait(&req, &status);
+               memset(recvcounts, 0, (p + 1)*sizeof(int));
+               memset(displs_C, 0, (p + 1)*sizeof(int));
+            } 
 
             // // gatherv C
             int curr_disp = 0;
@@ -217,19 +231,21 @@ int main(int argc, char *argv[]) {
                   recvcounts[host+1] = m_h*n_h_t;
                }
 
-               displs[host+1] = curr_disp;
+               displs_C[host+1] = curr_disp;
                curr_disp += recvcounts[host+1];
             }
 
-            MPI_Gatherv(NULL, 0, MPI_FLOAT, &C_p[C_offset], recvcounts, displs,
-               MPI_FLOAT, 0, comm_used);
+
+            MPI_Igatherv(NULL, 0, MPI_FLOAT, &C_p[C_offset], recvcounts, displs_C,
+               MPI_FLOAT, 0, comm_used, &req);
 
             C_offset += m_cb*n_h_t;
 
-            memset(recvcounts, 0, (p + 1)*sizeof(int));
-            memset(displs, 0, (p + 1)*sizeof(int));
          }
       }
+
+      // pthread_join(thr_result_server, NULL);
+      MPI_Wait(&req, &status);
 
       unpack_C_h(C, C_p, M, N, m_h, n_h, m_r, alpha_n, p);
 
@@ -243,7 +259,8 @@ int main(int argc, char *argv[]) {
 
       free(sendcounts);
       free(recvcounts);
-      free(displs);
+      free(displs_A);
+      free(displs_C);
       free(A_p);
       free(B_p);
       free(C_p);
@@ -274,11 +291,11 @@ int main(int argc, char *argv[]) {
                   host_entry->h_addr_list[0]));
 
       printf("Hostname: %s\n", hostbuffer);
-      printf("Host IP: %s", IPbuffer);
+      printf("Host IP: %s\n", IPbuffer);
 
       int host = taskid - 1;
 
-      float *A_h, *B_h, *B_h1, *B_h2, *C_h, *A_p;
+      float *A_h, *B_h, *B_h1, *B_h2, *C_h, *C_h1, *C_h2, *A_p;
 
       int m = 0, k = 0, n = 0;
       int nb_ind = 0;
@@ -316,6 +333,13 @@ int main(int argc, char *argv[]) {
       inp->alpha = 1;
       inp->beta = 1;
 
+      bool started = 0;
+      bool buf_C = 1;
+      MPI_Request req;
+      MPI_Status status;
+
+      cake_cntx_t* cake_cntx = cake_query_cntx();
+
       while(n < Nb) {
 
          if((m == Mb - 1) && m_pad && (host >= p_l)) {
@@ -346,7 +370,13 @@ int main(int argc, char *argv[]) {
 
 
             if(k == 0) {
-               C_h = (float*) calloc(m_h_t * n_h_t , sizeof( float ));
+               if(buf_C) {
+                  C_h1 = (float*) calloc(m_h_t * n_h_t , sizeof( float ));
+                  C_h = C_h1;
+               } else {
+                  C_h2 = (float*) calloc(m_h_t * n_h_t , sizeof( float ));     
+                  C_h = C_h2;                               
+               }
             }
 
             // A_h = (float*) malloc(m_h_t * k_h_t * sizeof( float ));
@@ -355,7 +385,7 @@ int main(int argc, char *argv[]) {
             MPI_Scatterv(NULL, NULL, NULL, MPI_FLOAT, A_h, m_h_t * k_h_t, 
                         MPI_FLOAT, 0, comm_used);
 
-            cake_cntx_t* cake_cntx = cake_query_cntx();
+            
             blk_dims_t* blk_dims = get_block_dims(cake_cntx, m_h_t, p_dev);
 
             // int A_sz = cake_sgemm_packed_A_size(m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
@@ -423,13 +453,27 @@ int main(int argc, char *argv[]) {
 
             if(k == Kb) {
 
+               if(started) {
+                  MPI_Wait(&req, &status);
+                  if(buf_C) {
+                     free(C_h2); 
+                  } else {
+                     free(C_h1);
+                  }
+               } else {
+                  started = 1;
+               }
+
+               MPI_Igatherv(C_h, m_h_t * n_h_t, MPI_FLOAT,
+                           NULL, NULL, NULL, MPI_FLOAT, 0, comm_used, &req);
+
                // gatherv C_h
                // MPI_Gatherv(C_h, m_h_t * n_h_t, MPI_FLOAT,
                //             NULL, NULL, NULL, MPI_FLOAT, 0, comm_used);
-               mpi_gather_launch(C_h, m_h_t, n_h_t, comm_used);
                k = 0;
                m++;
                // free(C_h);
+               buf_C = !buf_C;
             }
 
             if(m == Mb) {
@@ -438,6 +482,8 @@ int main(int argc, char *argv[]) {
             }
          }
       }
+
+      MPI_Wait(&req, &status);
 
       free(inp);
       free(A_h);
@@ -454,13 +500,5 @@ int main(int argc, char *argv[]) {
    MPI_Finalize();
 
    return 0;
-}
-
-
-void mpi_gather_launch(float* C_h, int m_h_t, int n_h_t, MPI_Comm comm_used) {
-
-   MPI_Gatherv(C_h, m_h_t * n_h_t, MPI_FLOAT,
-            NULL, NULL, NULL, MPI_FLOAT, 0, comm_used);
-   free(C_h);
 }
 
