@@ -3,6 +3,10 @@
 
 void cake_sgemm_net(int M, int N, int K, int p, int taskid) {
 
+   struct timespec start, end;
+   double diff_t;
+   long seconds, nanoseconds;
+
    int mat_inputs[4];
 
    if(taskid == 0) {
@@ -23,7 +27,15 @@ void cake_sgemm_net(int M, int N, int K, int p, int taskid) {
       rand_init(A, M, K);
       rand_init(B, K, N);
 
+      clock_gettime(CLOCK_REALTIME, &start);
+
       cake_sgemm_root(A, B, C, M, N, K, p, taskid);
+
+      clock_gettime(CLOCK_REALTIME, &end);
+      seconds = end.tv_sec - start.tv_sec;
+      nanoseconds = end.tv_nsec - start.tv_nsec;
+      diff_t = seconds + nanoseconds*1e-9;
+      printf("sgemm time: %f \n", diff_t); 
 
       cake_sgemm_checker(A, B, C, N, M, K);
 
@@ -34,6 +46,7 @@ void cake_sgemm_net(int M, int N, int K, int p, int taskid) {
 
    // hosts bcast recv M,N,K,p from server
    else {
+
       MPI_Bcast(mat_inputs, 4, MPI_INT, 0, MPI_COMM_WORLD);
       M = mat_inputs[0];
       K = mat_inputs[1];
@@ -47,6 +60,7 @@ void cake_sgemm_net(int M, int N, int K, int p, int taskid) {
 
 void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, int taskid) {
 
+   // maximum number of available hosts in network
    int h_max = 4;
 
    int m_h,  k_h,  n_h,
@@ -70,24 +84,15 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, i
    MPI_Comm comm_pad, comm_used;
    MPI_Comm_split(MPI_COMM_WORLD, color, taskid, &comm_pad);
 
-
-      
    printf("M = %d, K = %d, N = %d\n", M,K,N);
    printf("mh = %d\n", m_h);
 
    omp_set_num_threads(10); // TODO: use 10 threads only on intel i9 10900K
 
-   struct timespec start, end;
-   double diff_t;
-   long seconds, nanoseconds;
-
-
    // copy A,B,C for packing
    float* A_p = (float*) malloc(M * K * sizeof( float ));
    float* B_p = (float*) malloc(K * N * sizeof( float ));
    float* C_p = (float*) calloc(M * N , sizeof( float ));
-
-   clock_gettime(CLOCK_REALTIME, &start);
 
    // pack A and B before sending to hosts
    pack_A_h(A, A_p, M, K, m_h, k_h, m_r, p);
@@ -105,7 +110,6 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, i
 
    int m, k, n;
    int m_cb, n_h_t, k_h_t, p_used, host;
-
 
    MPI_Request req;
    MPI_Status status;
@@ -216,12 +220,6 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, i
    MPI_Wait(&req, &status);
 
    unpack_C_h(C, C_p, M, N, m_h, n_h, m_r, alpha_n, p);
-
-   clock_gettime(CLOCK_REALTIME, &end);
-    seconds = end.tv_sec - start.tv_sec;
-    nanoseconds = end.tv_nsec - start.tv_nsec;
-   diff_t = seconds + nanoseconds*1e-9;
-   printf("sgemm time: %f \n", diff_t); 
 
    free(sendcounts);
    free(recvcounts);
@@ -474,8 +472,6 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
    free(A_p);
    free(B_h1);
    free(B_h2);
-
-
 
    if(taskid <= p_l) {
       MPI_Comm_free(&comm_pad);
