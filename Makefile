@@ -26,11 +26,15 @@ CAKE_SRC := $(CAKE_HOME)/src
 
 # --- Targets/rules ------------------------------------------------------------
 
-all: compile
+all: compile1
 
-compile: $(wildcard *.h) $(wildcard *.c)
-	mpic++ -O3 -Wall $(CFLAGS) src/cake_sgemm_c2.cpp src/pack_c2.cpp \
-	src/block_sizing_c2.cpp $(LIBCAKE) -fopenmp -o cake_sgemm_c2
+compile1: $(wildcard *.h) $(wildcard *.c)
+	mpic++ -g -O3 -Wall $(CFLAGS) src/cake_sgemm_c2.cpp src/pack_c2.cpp \
+	src/block_sizing_c2.cpp cake_sgemm_test.cpp $(LIBCAKE) -fopenmp -pthread -o cake_sgemm_test
+
+compile2: $(wildcard *.h) $(wildcard *.c)
+	mpic++ -g -O3 -Wall $(CFLAGS) src/cake_sgemm2_c2.cpp src/pack_c2.cpp \
+	src/block_sizing_c2.cpp $(LIBCAKE) -fopenmp -pthread -o cake_sgemm2_c2
 
 clean:
 	rm -rf *.o *.so
