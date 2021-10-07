@@ -1,31 +1,39 @@
 #include "cake_c2.h"
 
 
-void cake_sgemm_net(int M, int N, int K, int p, int taskid) {
+static int m_h,  k_h,  n_h,
+m_h1,  k_h1,  n_h1,
+m_h1_last_host,  mr_dev,  m_r, 
+p_dev,  p_l, h_max = 4,
+m_pad,  k_pad,  n_pad,
+Mb,  Kb,  Nb;
+static double alpha_n;
 
-   struct timespec start, end;
-   double diff_t;
-   long seconds, nanoseconds;
+
+void cake_sgemm_net(float* A, float* B, float* C, int M, int N, int K, int p, int taskid) {
 
    int mat_inputs[4];
 
+   init_block_dims(&m_h, &k_h, &n_h,
+                 &m_h1, &k_h1, &n_h1,
+                 &m_h1_last_host, &mr_dev, &m_r, 
+                 &p_dev, &p_l, &alpha_n,
+                 &m_pad, &k_pad, &n_pad,
+                 &Mb, &Kb, &Nb,
+                 M, N, K, p, h_max);
+
    if(taskid == 0) {
       
+      struct timespec start, end;
+      double diff_t;
+      long seconds, nanoseconds;
+
       mat_inputs[0] = M;
       mat_inputs[1] = K;
       mat_inputs[2] = N;
       mat_inputs[3] = p;
       // bcast M,N,K,p
       MPI_Bcast(mat_inputs, 4, MPI_INT, 0, MPI_COMM_WORLD);
-
-      float* A = (float*) malloc(M * K * sizeof( float ));
-      float* B = (float*) malloc(K * N * sizeof( float ));
-      float* C = (float*) calloc(M * N , sizeof( float ));
-
-      // initialize A and B
-      srand(time(NULL));
-      rand_init(A, M, K);
-      rand_init(B, K, N);
 
       clock_gettime(CLOCK_REALTIME, &start);
 
@@ -60,25 +68,6 @@ void cake_sgemm_net(int M, int N, int K, int p, int taskid) {
 
 void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, int taskid) {
 
-   // maximum number of available hosts in network
-   int h_max = 4;
-
-   int m_h,  k_h,  n_h,
-   m_h1,  k_h1,  n_h1,
-   m_h1_last_host,  mr_dev,  m_r, 
-   p_dev,  p_l,
-   m_pad,  k_pad,  n_pad,
-   Mb,  Kb,  Nb;
-   double alpha_n;
-
-   init_block_dims(&m_h, &k_h, &n_h,
-                 &m_h1, &k_h1, &n_h1,
-                 &m_h1_last_host, &mr_dev, &m_r, 
-                 &p_dev, &p_l, &alpha_n,
-                 &m_pad, &k_pad, &n_pad,
-                 &Mb, &Kb, &Nb,
-                 M, N, K, p, h_max);
-
    // creates an extra communicator for p_l hosts involved in computing the m-padded region
    int color = taskid <= p_l ? 1 : MPI_UNDEFINED; // Determine color based on rank and p_l 
    MPI_Comm comm_pad, comm_used;
@@ -110,6 +99,7 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, i
 
    int m, k, n;
    int m_cb, n_h_t, k_h_t, p_used, host;
+
 
    MPI_Request req;
    MPI_Status status;
@@ -233,24 +223,6 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, i
 
 
 void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
-
-   int h_max = 4;
-
-   int m_h,  k_h,  n_h,
-   m_h1,  k_h1,  n_h1,
-   m_h1_last_host,  mr_dev,  m_r, 
-   p_dev,  p_l,
-   m_pad,  k_pad,  n_pad,
-   Mb,  Kb,  Nb;
-   double alpha_n;
-
-   init_block_dims(&m_h, &k_h, &n_h,
-                 &m_h1, &k_h1, &n_h1,
-                 &m_h1_last_host, &mr_dev, &m_r, 
-                 &p_dev, &p_l, &alpha_n,
-                 &m_pad, &k_pad, &n_pad,
-                 &Mb, &Kb, &Nb,
-                 M, N, K, p, h_max);
 
    // creates an extra communicator for p_l hosts involved in computing the m-padded region
    int color = taskid <= p_l ? 1 : MPI_UNDEFINED; // Determine color based on rank and p_l 
@@ -472,6 +444,8 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
    free(A_p);
    free(B_h1);
    free(B_h2);
+
+
 
    if(taskid <= p_l) {
       MPI_Comm_free(&comm_pad);

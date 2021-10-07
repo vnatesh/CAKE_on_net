@@ -1,7 +1,6 @@
 #include "cake_c2.h"
 
 
-
 int main(int argc, char *argv[]) {
 
    int numtasks,              /* number of tasks in partition */
@@ -30,7 +29,20 @@ int main(int argc, char *argv[]) {
    N = atoi(argv[3]);
    p = numtasks - 1; // number of devices on the network
 
-   cake_sgemm_net(M, N, K, p, taskid);
+   float *A = NULL, *B = NULL, *C = NULL;
+
+   // root process on server initializes input matrices
+   if(taskid == 0) {
+      A = (float*) malloc(M * K * sizeof( float ));
+      B = (float*) malloc(K * N * sizeof( float ));
+      C = (float*) calloc(M * N , sizeof( float ));
+
+      srand(time(NULL));
+      rand_init(A, M, K);
+      rand_init(B, K, N);      
+   }
+
+   cake_sgemm_net(A, B, C, M, N, K, p, taskid);
 
    MPI_Finalize();
 

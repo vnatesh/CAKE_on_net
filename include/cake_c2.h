@@ -17,11 +17,12 @@
 #include "cake.h"
 
 
+
 struct result_input {
-	float* C;
-	MPI_Comm comm;
-	int M;
-	int N;
+       float* C;
+       MPI_Comm comm;
+       int M;
+       int N;
 };
 
 
@@ -47,6 +48,6 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, i
 
 void cake_sgemm_host(int M, int N, int K, int p, int taskid);
 
-void cake_sgemm_net(int M, int N, int K, int p, int taskid);
+void cake_sgemm_net(float* A, float* B, float* C, int M, int N, int K, int p, int taskid);
 
 int run_tests();
