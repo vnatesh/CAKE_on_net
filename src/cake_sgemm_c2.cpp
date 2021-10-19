@@ -339,7 +339,7 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
                      MPI_FLOAT, 0, comm_used);
 
          
-         blk_dims_t* blk_dims = get_block_dims(cake_cntx, m_h_t, p_dev);
+         blk_dims_t* blk_dims = get_block_dims(cake_cntx, m_h_t, p_dev, KMN);
 
          // int A_sz = cake_sgemm_packed_A_size(m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
          // posix_memalign((void**) &A_p, 64, A_sz);
