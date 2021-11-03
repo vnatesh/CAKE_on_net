@@ -16,6 +16,25 @@
 #include "mpi.h"
 #include "cake.h"
 
+extern int m_h;
+extern int k_h;
+extern int n_h;
+extern int m_h1;
+extern int k_h1;
+extern int n_h1;
+extern int m_h1_last_host;
+extern int mr_dev;
+extern int m_r;
+extern int p_dev;
+extern int p_l;
+extern int h_max;
+extern int m_pad;
+extern int k_pad;
+extern int n_pad;
+extern int Mb;
+extern int Kb;
+extern int Nb;
+extern double alpha_n;
 
 
 struct result_input {
@@ -28,13 +47,7 @@ struct result_input {
 
 // void cake_sgemm_net(int M, int N, int K, int p, int taskid, MPI_Comm comm_world);
 
-void init_block_dims(int* mh, int* kh, int* nh,
-                     int* mh1, int* kh1, int* nh1,
-                     int* mh1_last_host, int* mrdev, int* mr, 
-                     int* pdev, int* pl, double* alphan,
-                     int* mpad, int* kpad, int* npad,
-                     int* Mb, int* Kb, int* Nb,
-                     int M, int N, int K, int p, int h_max);
+void init_block_dims(int M, int N, int K, int p, int h_max);
 
 int get_block_dim_C2(unsigned long long dev_dram_sz, double alpha_n, int p);
 

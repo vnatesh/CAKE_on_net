@@ -1,26 +1,11 @@
 #include "cake_c2.h"
 
 
-static int m_h,  k_h,  n_h,
-m_h1,  k_h1,  n_h1,
-m_h1_last_host,  mr_dev,  m_r, 
-p_dev,  p_l, h_max = 4,
-m_pad,  k_pad,  n_pad,
-Mb,  Kb,  Nb;
-static double alpha_n;
-
-
 void cake_sgemm_net(float* A, float* B, float* C, int M, int N, int K, int p, int taskid) {
 
    int mat_inputs[4];
 
-   init_block_dims(&m_h, &k_h, &n_h,
-                 &m_h1, &k_h1, &n_h1,
-                 &m_h1_last_host, &mr_dev, &m_r, 
-                 &p_dev, &p_l, &alpha_n,
-                 &m_pad, &k_pad, &n_pad,
-                 &Mb, &Kb, &Nb,
-                 M, N, K, p, h_max);
+   init_block_dims(M, N, K, p, h_max);
 
    if(taskid == 0) {
       
@@ -343,7 +328,7 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
 
          // int A_sz = cake_sgemm_packed_A_size(m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
          // posix_memalign((void**) &A_p, 64, A_sz);
-         // pack A and reused this packed copy for all B tiles in the CB block
+         // pack A and reuse this packed copy for all B tiles in the CB block
          pack_A_single_buf(A_h, A_p, m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
 
          int z1 = (int) (alpha_n*m_h);
@@ -360,8 +345,6 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
             if((nb_ind == num_B - 1) && n_rem) {
                n_hx = n_rem;
             }
-
-            // B_h = (float*) malloc(k_h_t*n_hx * sizeof(float));
 
             // mpi bcast recv B_h
             MPI_Bcast(B_h, k_h_t*n_hx, MPI_FLOAT, 0, comm_used);
@@ -383,26 +366,19 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
             B_h = buf ? B_h1 : B_h2;
             buf = !buf;
 
+            // launch matmul on separate thread to overlap compute with IO
             if(pthread_create(&gemm_thread, NULL, cake_sgemm_launch, (void*) inp) != 0) {
                printf("Thread creation failed\n");
             }
 
-            // execute matmul
-            // cake_sgemm(A_p, B_h, &C_h[C_offset], m_h_t, n_hx, k_h_t, p_dev, cake_cntx, true, false, 1 , 1);
             C_offset += m_h_t*n_hx;
             nb_ind++;
-            // memset(B_h, 0, k_h * n_h * sizeof(float));
-            // free(B_h);
          }
 
          pthread_join(gemm_thread, NULL);
 
          k++;
          nb_ind = 0;
-         // free(A_h);
-         // free(A_p);
-         // memset(A_h, 0, k_h * m_h * sizeof(float));
-         // memset(A_p, 0, k_h * (m_h+mr_dev) * sizeof(float));
 
          if(k == Kb) {
 
@@ -417,15 +393,12 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
                started = 1;
             }
 
+            // non-blocking gatherv C_h
             MPI_Igatherv(C_h, m_h_t * n_h_t, MPI_FLOAT,
                         NULL, NULL, NULL, MPI_FLOAT, 0, comm_used, &req);
 
-            // gatherv C_h
-            // MPI_Gatherv(C_h, m_h_t * n_h_t, MPI_FLOAT,
-            //             NULL, NULL, NULL, MPI_FLOAT, 0, comm_used);
             k = 0;
             m++;
-            // free(C_h);
             buf_C = !buf_C;
          }
 
