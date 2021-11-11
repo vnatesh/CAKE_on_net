@@ -324,12 +324,12 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
                      MPI_FLOAT, 0, comm_used);
 
          
-         blk_dims_t* blk_dims = get_block_dims(cake_cntx, m_h_t, p_dev, KMN);
+         // blk_dims_t* blk_dims = get_block_dims(cake_cntx, m_h_t, p_dev, KMN);
 
          // int A_sz = cake_sgemm_packed_A_size(m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
          // posix_memalign((void**) &A_p, 64, A_sz);
          // pack A and reuse this packed copy for all B tiles in the CB block
-         pack_A_single_buf(A_h, A_p, m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
+         pack_A_single_buf_k_first(A_h, A_p, m_h_t, k_h_t, p_dev, cake_cntx);
 
          int z1 = (int) (alpha_n*m_h);
          int num_B = (n_h_t / z1) + ((n_h_t % z1) ? 1 : 0);
