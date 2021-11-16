@@ -222,8 +222,17 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, b
 
 void cake_sgemm_host(int M, int N, int K, int p, blk_dims_net_t* x, int taskid) {
 
-   x->h_max = 4;
+#ifdef USE_CAKE 
+   blk_dims_t* xa = (blk_dims_t*) malloc(sizeof(blk_dims_t));
+   cake_cntx_t* cake_cntx = cake_query_cntx();
+#endif
 
+#ifdef USE_MKL
+   blk_dims_t* xa = NULL;
+   cake_cntx_t* cake_cntx = NULL;
+#endif
+
+   x->h_max = 4;
 
    int m_h = x->m_h, k_h = x->k_h, n_h = x->n_h;
    int m_h1 = x->m_h1, k_h1 = x->k_h1, n_h1 = x->n_h1;
@@ -295,14 +304,13 @@ void cake_sgemm_host(int M, int N, int K, int p, blk_dims_net_t* x, int taskid) 
    inp->packedB = 0;
    inp->alpha = 1;
    inp->beta = 1;
+   inp->cake_cntx = cake_cntx;
 
    bool started = 0;
    bool buf_C = 1;
    MPI_Request req;
    MPI_Status status;
 
-   blk_dims_t* xa = (blk_dims_t*) malloc(sizeof(blk_dims_t));
-   cake_cntx_t* cake_cntx = cake_query_cntx();
 
    while(n < Nb) {
 
@@ -348,10 +356,18 @@ void cake_sgemm_host(int M, int N, int K, int p, blk_dims_net_t* x, int taskid) 
                      MPI_FLOAT, 0, comm_used);
 
          // pack A and reuse this packed copy for all B tiles in the CB block
+         // pack_A_tile(A_h, A_p, m_h_t, n_h_t, k_h_t, 
+         //                p_dev, inp->alpha, xa, cake_cntx);
+#ifdef USE_CAKE 
          init_block_dims(m_h_t, n_h_t, k_h_t, p_dev, xa, cake_cntx, KMN);
          pack_A_single_buf_k_first(A_h, A_p, m_h_t, k_h_t, p_dev, xa, cake_cntx);
+         inp->A = A_p;
+#endif
 
-         
+#ifdef USE_MKL
+         inp->A = A_h;
+#endif
+
          int z1 = (int) (alpha_n*m_h);
          int num_B = (n_h_t / z1) + ((n_h_t % z1) ? 1 : 0);
          int n_rem = n_h_t % z1;
@@ -379,19 +395,16 @@ void cake_sgemm_host(int M, int N, int K, int p, blk_dims_net_t* x, int taskid) 
             inp->N = n_hx;
             inp->K = k_h_t;
             inp->p = p_dev;
-            inp->A = A_p;
+            // inp->A = A_p;
             inp->B = B_h;
             inp->C = &C_h[C_offset];
-            inp->cake_cntx = cake_cntx; 
 
             // switch buffers for double buffering
             B_h = buf ? B_h1 : B_h2;
             buf = !buf;
 
-            // launch matmul on separate thread to overlap compute with IO
-            if(pthread_create(&gemm_thread, NULL, cake_sgemm_launch, (void*) inp) != 0) {
-               printf("Thread creation failed\n");
-            }
+            // launch gemm asynchronously to overlap compute with IO of next B tile
+            launch_gemm_thread(&gemm_thread, inp);
 
             C_offset += m_h_t*n_hx;
             nb_ind++;

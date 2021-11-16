@@ -26,15 +26,20 @@ CAKE_SRC := $(CAKE_HOME)/src
 
 # --- Targets/rules ------------------------------------------------------------
 
-all: compile1
+all: cake
 
-compile1: $(wildcard *.h) $(wildcard *.c)
+cake: $(wildcard *.h) $(wildcard *.c)
 	mpic++ -g -O3 -Wall $(CFLAGS) src/cake_sgemm_c2.cpp src/pack_c2.cpp \
-	src/block_sizing_c2.cpp cake_sgemm_test.cpp $(LIBCAKE) -fopenmp -pthread -o cake_sgemm_test
+	src/block_sizing_c2.cpp src/cake_thr.cpp src/helper.cpp cake_sgemm_test.cpp $(LIBCAKE) -fopenmp -pthread \
+	-DUSE_CAKE -o cake_sgemm_test
 
-compile2: $(wildcard *.h) $(wildcard *.c)
-	mpic++ -g -O3 -Wall $(CFLAGS) src/cake_sgemm2_c2.cpp src/pack_c2.cpp \
-	src/block_sizing_c2.cpp $(LIBCAKE) -fopenmp -pthread -o cake_sgemm2_c2
+mkl: $(wildcard *.h) $(wildcard *.c)
+	mpic++ -fopenmp -m64 -I${MKLROOT}/include -I${CAKE_HOME} -I${C2_INC_PATH} \
+	-Wl,--no-as-needed -L${MKLROOT}/lib/intel64  -lmkl_intel_lp64 -lmkl_core \
+	-lmkl_gnu_thread -lpthread -lm -ldl src/cake_sgemm_c2.cpp src/pack_c2.cpp \
+	src/block_sizing_c2.cpp src/mkl_thr.cpp src/util.cpp src/helper.cpp \
+	cake_sgemm_test.cpp -DUSE_MKL -o cake_sgemm_test
+
 
 clean:
 	rm -rf *.o *.so
