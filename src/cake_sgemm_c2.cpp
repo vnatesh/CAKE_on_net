@@ -1,11 +1,16 @@
 #include "cake_c2.h"
 
 
+
+// TODO...programmatically get mr/nr for intel skylake correctly
+// TODO...get h_max from sbatch script input
+// TODO... add input for DRAM size of node to init_block_dims_net
 void cake_sgemm_net(float* A, float* B, float* C, int M, int N, int K, int p, int taskid) {
 
    int mat_inputs[4];
-
-   init_block_dims(M, N, K, p, h_max);
+   int h_max = 4;
+   blk_dims_net_t* blk_dims_net = (blk_dims_net_t*) malloc(sizeof(blk_dims_net_t));
+   init_block_dims_net(M, N, K, p, blk_dims_net, h_max);
 
    if(taskid == 0) {
       
@@ -22,7 +27,7 @@ void cake_sgemm_net(float* A, float* B, float* C, int M, int N, int K, int p, in
 
       clock_gettime(CLOCK_REALTIME, &start);
 
-      cake_sgemm_root(A, B, C, M, N, K, p, taskid);
+      cake_sgemm_root(A, B, C, M, N, K, p, blk_dims_net, taskid);
 
       clock_gettime(CLOCK_REALTIME, &end);
       seconds = end.tv_sec - start.tv_sec;
@@ -46,12 +51,20 @@ void cake_sgemm_net(float* A, float* B, float* C, int M, int N, int K, int p, in
       N = mat_inputs[2];
       p = mat_inputs[3];
 
-      cake_sgemm_host(M, N, K, p, taskid);
+      cake_sgemm_host(M, N, K, p, blk_dims_net, taskid);
    }
 }
 
 
-void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, int taskid) {
+void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, blk_dims_net_t* x, int taskid) {
+
+   int m_h = x->m_h, k_h = x->k_h, n_h = x->n_h;
+   int m_h1 = x->m_h1, k_h1 = x->k_h1, n_h1 = x->n_h1;
+   int m_h1_last_host = x->m_h1_last_host;
+   int p_l = x->p_l;
+   int m_pad = x->m_pad, k_pad = x->k_pad, n_pad = x->n_pad;
+   int Mb = x->Mb, Kb = x->Kb, Nb = x->Nb;
+   double alpha_n = x->alpha_n;
 
    // creates an extra communicator for p_l hosts involved in computing the m-padded region
    int color = taskid <= p_l ? 1 : MPI_UNDEFINED; // Determine color based on rank and p_l 
@@ -69,8 +82,8 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, i
    float* C_p = (float*) calloc(M * N , sizeof( float ));
 
    // pack A and B before sending to hosts
-   pack_A_h(A, A_p, M, K, m_h, k_h, m_r, p);
-   pack_B_h(B, B_p, K, N, m_h, k_h, n_h, alpha_n, p);
+   pack_A_h(A, A_p, M, K, p, x);
+   pack_B_h(B, B_p, K, N, p, x);
 
    if(DEBUG) printf("m_h = %d, k_h = %d, n_h = %d\n", m_h, k_h, n_h);
 
@@ -194,7 +207,7 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, i
    // pthread_join(thr_result_server, NULL);
    MPI_Wait(&req, &status);
 
-   unpack_C_h(C, C_p, M, N, m_h, n_h, m_r, alpha_n, p);
+   unpack_C_h(C, C_p, M, N, p, x);
 
    free(sendcounts);
    free(recvcounts);
@@ -207,7 +220,19 @@ void cake_sgemm_root(float* A, float* B, float* C, int M, int N, int K, int p, i
 
 
 
-void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
+void cake_sgemm_host(int M, int N, int K, int p, blk_dims_net_t* x, int taskid) {
+
+   x->h_max = 4;
+
+
+   int m_h = x->m_h, k_h = x->k_h, n_h = x->n_h;
+   int m_h1 = x->m_h1, k_h1 = x->k_h1, n_h1 = x->n_h1;
+   int m_h1_last_host = x->m_h1_last_host;
+   int mr_dev = x->mr_dev;
+   int p_dev = x->p_dev, p_l = x->p_l;
+   int m_pad = x->m_pad, k_pad = x->k_pad, n_pad = x->n_pad;
+   int Mb = x->Mb, Kb = x->Kb, Nb = x->Nb;
+   double alpha_n = x->alpha_n;
 
    // creates an extra communicator for p_l hosts involved in computing the m-padded region
    int color = taskid <= p_l ? 1 : MPI_UNDEFINED; // Determine color based on rank and p_l 
@@ -276,6 +301,7 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
    MPI_Request req;
    MPI_Status status;
 
+   blk_dims_t* xa = (blk_dims_t*) malloc(sizeof(blk_dims_t));
    cake_cntx_t* cake_cntx = cake_query_cntx();
 
    while(n < Nb) {
@@ -317,20 +343,15 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
             }
          }
 
-         // A_h = (float*) malloc(m_h_t * k_h_t * sizeof( float ));
-         
          // mpi scatterv recv A_h
          MPI_Scatterv(NULL, NULL, NULL, MPI_FLOAT, A_h, m_h_t * k_h_t, 
                      MPI_FLOAT, 0, comm_used);
 
-         
-         // blk_dims_t* blk_dims = get_block_dims(cake_cntx, m_h_t, p_dev, KMN);
-
-         // int A_sz = cake_sgemm_packed_A_size(m_h_t, k_h_t, p_dev, cake_cntx, blk_dims);
-         // posix_memalign((void**) &A_p, 64, A_sz);
          // pack A and reuse this packed copy for all B tiles in the CB block
-         pack_A_single_buf_k_first(A_h, A_p, m_h_t, k_h_t, p_dev, cake_cntx);
+         init_block_dims(m_h_t, n_h_t, k_h_t, p_dev, xa, cake_cntx, KMN);
+         pack_A_single_buf_k_first(A_h, A_p, m_h_t, k_h_t, p_dev, xa, cake_cntx);
 
+         
          int z1 = (int) (alpha_n*m_h);
          int num_B = (n_h_t / z1) + ((n_h_t % z1) ? 1 : 0);
          int n_rem = n_h_t % z1;
@@ -338,6 +359,7 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
 
          bool buf = 0; // controls buf choice
          B_h = B_h1;
+
 
          while(nb_ind < num_B) {
 
@@ -411,6 +433,7 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
 
    MPI_Wait(&req, &status);
 
+   free(xa);
    free(cake_cntx);
    free(inp);
    free(A_h);
@@ -424,4 +447,3 @@ void cake_sgemm_host(int M, int N, int K, int p, int taskid) {
       MPI_Comm_free(&comm_pad);
    }
 }
-

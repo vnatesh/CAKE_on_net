@@ -1,23 +1,18 @@
 #include "cake_c2.h"
 
-void pack_A_h(float* A, float* A_p, int M, int K, int m_h, int k_h, int m_r, int p) {
+void pack_A_h(float* A, float* A_p, int M, int K, int p, blk_dims_net_t* x) {
 
-   int k_pad = (K % k_h) ? 1 : 0; 
-   int m_pad = (M % (p*m_h)) ? 1 : 0; 
-   int Mb = (M / (p*m_h)) + m_pad;
-   int Kb = (K / k_h) + k_pad;
+   int m_h = x->m_h, k_h = x->k_h;
+   int m_h1 = x->m_h1, k_h1 = x->k_h1;
+   int m_h1_last_host = x->m_h1_last_host;
+   int p_l = x->p_l;
+   int m_pad = x->m_pad, k_pad = x->k_pad;
+   int Mb = x->Mb, Kb = x->Kb;
 
-   int mr_rem = (int) ceil( ((double) (M % (p*m_h))) / m_r) ;
-   int mr_per_host = (int) ceil( ((double) mr_rem) / p );
-   int p_l;
-   if(mr_per_host) 
-      p_l = (int) ceil( ((double) mr_rem) / mr_per_host);
-   else
-      p_l = 0;
 
-   int m_h1 = mr_per_host * m_r;
-   int m_h1_last_host = (M % (p*m_h)) - (p_l-1)*m_h1;
-   int k_h1 = K % k_h;
+// printf("packing %d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n\n", 
+//    m_h,k_h,m_h1,k_h1,m_h1_last_host,p_l,m_pad,k_pad,Mb,Kb);
+
 
    int m, k, A_offset = 0;
    int m_cb, k_h_t, p_used, host;
@@ -67,19 +62,21 @@ void pack_A_h(float* A, float* A_p, int M, int K, int m_h, int k_h, int m_r, int
 
 
 
-void pack_B_h(float* B, float* B_p, int K, int N, int m_h, int k_h, int n_h, double alpha_n, int p) {
+void pack_B_h(float* B, float* B_p, int K, int N, int p, blk_dims_net_t* x) {
 
-   int k_pad = (K % k_h) ? 1 : 0; 
-   int n_pad = (N % n_h) ? 1 : 0; 
-
-   int Nb = (N / n_h) + n_pad;
-   int Kb = (K / k_h) + k_pad;
-
-   int n_h1 = N % n_h;
-   int k_h1 = K % k_h;
+   int m_h = x->m_h, k_h = x->k_h, n_h = x->n_h;
+   int k_h1 = x->k_h1, n_h1 = x->n_h1;
+   int k_pad = x->k_pad, n_pad = x->n_pad;
+   int Kb = x->Kb, Nb = x->Nb;
+   double alpha_n = x->alpha_n;
 
    int B_offset = 0;
    int k, n, n_h_t;
+
+
+printf("packing %d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n\n", 
+   m_h,k_h,n_h,k_h1,n_h1,k_pad,n_pad,Kb,Nb);
+
 
    for(n = 0; n < Nb; n++) {
 
@@ -123,28 +120,23 @@ void pack_B_h(float* B, float* B_p, int K, int N, int m_h, int k_h, int n_h, dou
 
 
 
-void unpack_C_h(float* C, float* C_p, int M, int N, int m_h, int n_h, int m_r, double alpha_n, int p) {
+void unpack_C_h(float* C, float* C_p, int M, int N, int p, blk_dims_net_t* x) {
 
-   int n_pad = (N % n_h) ? 1 : 0; 
-   int m_pad = (M % (p*m_h)) ? 1 : 0; 
-   int Mb = (M / (p*m_h)) + m_pad;
-   int Nb = (N / n_h) + n_pad;
-
-   int mr_rem = (int) ceil( ((double) (M % (p*m_h))) / m_r) ;
-   int mr_per_host = (int) ceil( ((double) mr_rem) / p );
-   int p_l;
-   if(mr_per_host) 
-      p_l = (int) ceil( ((double) mr_rem) / mr_per_host);
-   else
-      p_l = 0;
-
-   int n_h1 = N % n_h;
-   int m_h1 = mr_per_host * m_r;
-   int m_h1_last_host = (M % (p*m_h)) - (p_l-1)*m_h1;
+   int m_h = x->m_h, n_h = x->n_h;
+   int m_h1 = x->m_h1, n_h1 = x->n_h1;
+   int m_h1_last_host = x->m_h1_last_host;
+   int p_l = x->p_l;
+   int m_pad = x->m_pad, n_pad = x->n_pad;
+   int Mb = x->Mb, Nb = x->Nb;
+   double alpha_n = x->alpha_n;
 
    int C_offset = 0;
    int m, n;
    int m_cb, n_h_t, p_used, host;
+
+// printf("unpackng %d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%f\n\n", 
+//    m_h,n_h,m_h1,n_h1,m_h1_last_host,p_l,m_pad,n_pad,Mb,Nb,alpha_n);
+
 
    for(n = 0; n < Nb; n++) {
 

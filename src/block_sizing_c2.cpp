@@ -5,26 +5,6 @@
 //    return (int) sqrt(((double) dev_dram_sz / (4*2*2.0)) / (2 + alpha_n*p));
 // }
 
-int m_h;
-int k_h;
-int n_h;
-int m_h1;
-int k_h1;
-int n_h1;
-int m_h1_last_host;
-int mr_dev;
-int m_r;
-int p_dev;
-int p_l;
-int h_max = 4;
-int m_pad;
-int k_pad;
-int n_pad;
-int Mb;
-int Kb;
-int Nb;
-double alpha_n;
-
 
 /*
 In each host, we need memory allocated for the following tiles:
@@ -41,39 +21,40 @@ int get_block_dim_C2(unsigned long long dev_dram_sz, double alpha_n, int p) {
 }
 
 
-void init_block_dims(int M, int N, int K, int p, int h_max) {
+void init_block_dims_net(int M, int N, int K, int p, blk_dims_net_t* x, int h_max) {
 
-   alpha_n = 1.0;
-   m_h = get_block_dim_C2(1ULL << 27, alpha_n, h_max);
-   k_h = m_h;
-   n_h = (int) (alpha_n * p * m_h);
+   x->alpha_n = 1.0;
+   x->m_h = get_block_dim_C2(1ULL << 27, x->alpha_n, h_max);
+   x->k_h = x->m_h;
+   x->n_h = (int) (x->alpha_n * p * x->m_h);
 
-   p_dev = 4; // number of cores on a single device
-   mr_dev = 4; //4; // mr on raspbi device
-   m_r = mr_dev*p_dev > m_h ? m_h : mr_dev*p_dev;
+   x->p_dev = 4; // number of cores on a single device
+   x->mr_dev = 4; //4; // mr on raspbi device
+   x->m_r = x->mr_dev*x->p_dev > x->m_h ? x->m_h : x->mr_dev*x->p_dev;
 
-   k_pad = (K % k_h) ? 1 : 0; 
-   n_pad = (N % n_h) ? 1 : 0; 
-   m_pad = (M % (p*m_h)) ? 1 : 0; 
+   x->k_pad = (K % x->k_h) ? 1 : 0; 
+   x->n_pad = (N % x->n_h) ? 1 : 0; 
+   x->m_pad = (M % (p*x->m_h)) ? 1 : 0; 
 
-   Mb = (M / (p*m_h)) + m_pad;
-   Nb = (N / n_h) + n_pad;
-   Kb = (K / k_h) + k_pad;
+   x->Mb = (M / (p*x->m_h)) + x->m_pad;
+   x->Nb = (N / x->n_h) + x->n_pad;
+   x->Kb = (K / x->k_h) + x->k_pad;
 
-   int mr_rem = (int) ceil( ((double) (M % (p*m_h))) / m_r) ;
+   int mr_rem = (int) ceil( ((double) (M % (p*x->m_h))) / x->m_r) ;
    int mr_per_host = (int) ceil( ((double) mr_rem) / p );
    
    if(mr_per_host) 
-      p_l = (int) ceil( ((double) mr_rem) / mr_per_host);
+      x->p_l = (int) ceil( ((double) mr_rem) / mr_per_host);
    else
-      p_l = 0;
+      x->p_l = 0;
 
    // int nr_rem = (int) ceil( ((double) (N % n_c) / n_r)) ;
-   n_h1 = N % n_h;
+   x->n_h1 = N % x->n_h;
 
-   m_h1 = mr_per_host * m_r;
-   m_h1_last_host = (M % (p*m_h)) - (p_l-1)*m_h1;
-   // (mr_per_host - (p_l*mr_per_host - mr_rem)) * m_r;
-   k_h1 = K % k_h;
+   x->m_h1 = mr_per_host * x->m_r;
+   x->m_h1_last_host = (M % (p*x->m_h)) - (x->p_l-1)*x->m_h1;
+   // (mr_per_host - (x->p_l*mr_per_host - mr_rem)) * x->m_r;
+   x->k_h1 = K % x->k_h;
+
 }
 
